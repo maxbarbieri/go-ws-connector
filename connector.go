@@ -304,6 +304,8 @@ func (wsc *websocketConnector) incomingWsMessageReader() {
 			return
 		}
 
+		log.Tracef("[%s][WsReader] Received ws msg: %s\n", wsc.logTag, msgBytes)
+
 		//unmarshal message
 		var msg wsReceivedMessage
 		err = jsoniter.ConfigFastest.Unmarshal(msgBytes, &msg)
@@ -583,6 +585,8 @@ func (wsc *websocketConnector) outgoingWsMessageWriter() {
 			log.Warningf("[%s][OutgoingWsMsgHandler] Error in jsoniter.Marshal(msg): %s | skipping this message...\n", wsc.logTag, err)
 			continue
 		}
+
+		log.Tracef("[%s][OutgoingWsMsgHandler] Sending ws msg: %s\n", wsc.logTag, msgBytes)
 
 		err = wsc.wsConn.WriteMessage(websocket.TextMessage, msgBytes)
 		if err != nil {

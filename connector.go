@@ -1038,7 +1038,7 @@ func (wsc *websocketConnector) reset() {
 			for err != nil {
 				log.Warningf("[%s][ResetProcedure] Error in wsc.openClientWsConnection(): %s | retrying in %d seconds...\n", wsc.logTag, err, wsc.secondsBetweenReconnections)
 
-				//wait before reconnection (exponential backoff)
+				//wait before reconnection
 				time.Sleep(time.Duration(wsc.secondsBetweenReconnections) * time.Second)
 
 				//open ws connection

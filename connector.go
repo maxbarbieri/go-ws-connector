@@ -28,9 +28,12 @@ type ClientConnector interface {
 	// Subscription data will be sent on the returned channels, until the peer sends a special message, marked as the "last"
 	// one, that causes the channels to be closed. You may need to keep the returned ID to pause or resume the subscription,
 	// unsubscribe, or to send subscription update requests.
-	// For client connectors: persistent subscriptions are automatically restored (the subscription request is
+	// Persistent subscriptions are automatically restored (the subscription request is
 	// automatically re-sent to the peer) when the connection is restored after a failure. In this case, the same
 	// channels and subscription ID of the original subscription are used for the restored subscription.
+	// If an error is returned, no subscription has been made, you have to retry by calling PersistentSubscribe again.
+	// Once the "first" subscription is made (and no error is returned), only then it will automatically be restored on
+	// reconnections.
 	PersistentSubscribe(topic string, data interface{}) (uint64, *SubscriptionDataReader, error)
 
 	// UpdateSubscription If a subscription update message is sent with a subId of a previous subscription that is not active

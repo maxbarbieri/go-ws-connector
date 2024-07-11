@@ -138,7 +138,6 @@ type websocketConnector struct {
 	outgoingMsgChanBufferSize         int
 
 	secondsBetweenReconnections int64
-	expBackoffBase              int64
 
 	nextReqIdLock sync.Mutex
 	nextReqId     uint64
@@ -172,14 +171,13 @@ func NewClientConnectorWithDefaultParameters(wsUrl string, requestHandlers []*Re
 	return NewClientConnector(wsUrl, requestHandlers, subscriptionRequestHandlers, 1000, 100, 300, 10, 2, logTag, authTokenGenerator, connFailedCallback, connRestoredCallback)
 }
 
-func NewClientConnector(wsUrl string, requestHandlers []*RequestHandlerInfo, subscriptionRequestHandlers []*SubscriptionRequestHandlerInfo, incomingMsgChanBufferSize, outgoingMsgChanBufferSize, responseChanBufferSize, subscriptionRequestChanBufferSize int, expBackoffBase int64, logTag string, authTokenGenerator func() ([]string, []string), connFailedCallback func(failedConnector Connector), connRestoredCallback func(restoredConnector Connector)) (ClientConnector, error) {
+func NewClientConnector(wsUrl string, requestHandlers []*RequestHandlerInfo, subscriptionRequestHandlers []*SubscriptionRequestHandlerInfo, incomingMsgChanBufferSize, outgoingMsgChanBufferSize, responseChanBufferSize, subscriptionRequestChanBufferSize int, secondsBetweenReconnections int64, logTag string, authTokenGenerator func() ([]string, []string), connFailedCallback func(failedConnector Connector), connRestoredCallback func(restoredConnector Connector)) (ClientConnector, error) {
 	//instantiate the websocket connector
 	wsConnector := websocketConnector{
 		logTag:                                 logTag,
 		wsUrl:                                  wsUrl,
 		authTokenGenerator:                     authTokenGenerator,
-		secondsBetweenReconnections:            1,
-		expBackoffBase:                         expBackoffBase,
+		secondsBetweenReconnections:            secondsBetweenReconnections,
 		responseChanBufferSize:                 responseChanBufferSize,
 		subscriptionRequestChanBufferSize:      subscriptionRequestChanBufferSize,
 		incomingMsgChanBufferSize:              incomingMsgChanBufferSize,
@@ -225,7 +223,6 @@ func NewServerConnector(wsConn *websocket.Conn, requestHandlers []*RequestHandle
 	wsConnector := websocketConnector{
 		logTag:                                 logTag,
 		wsConn:                                 wsConn,
-		secondsBetweenReconnections:            1,
 		responseChanBufferSize:                 responseChanBufferSize,
 		subscriptionRequestChanBufferSize:      subscriptionRequestChanBufferSize,
 		incomingMsgChanBufferSize:              incomingMsgChanBufferSize,
@@ -1044,18 +1041,12 @@ func (wsc *websocketConnector) reset() {
 				//wait before reconnection (exponential backoff)
 				time.Sleep(time.Duration(wsc.secondsBetweenReconnections) * time.Second)
 
-				//get next wait time
-				wsc.secondsBetweenReconnections *= wsc.expBackoffBase
-
 				//open ws connection
 				err = wsc.openClientWsConnection()
 			}
 
 			//once websocket has been opened successfully, start goroutines
 			wsc.startGoroutines()
-
-			//reset time between reconnections
-			wsc.secondsBetweenReconnections = 1
 
 			//restore persistent subscriptions (note that the only subscriptions that remain in mapSentSubIdToSubDataReader
 			//are the persistent ones, since we removed the standard ones earlier in the reset procedure)

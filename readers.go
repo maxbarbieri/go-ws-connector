@@ -288,8 +288,9 @@ func (sdr *SubscriptionDataReader) GetRawSubscriptionDataChannels() (chan jsonit
 	return sdr.dataChan, sdr.errorChan, nil
 }
 
-// GetTypedSubscriptionDataOnChannels does NOT automatically close the channels passed as parameters when the subscription is closed
-func GetTypedSubscriptionDataOnChannels[DataType any](sdr *SubscriptionDataReader, typedDataChan chan *DataType, errorChan chan error) error {
+// GetTypedSubscriptionDataOnChannels does NOT automatically close the channels passed as parameters when the subscription is closed.
+// An empty struct is sent on the unsubscribeChan when the subscription is closed. unsubscribeChan can be nil.
+func GetTypedSubscriptionDataOnChannels[DataType any](sdr *SubscriptionDataReader, typedDataChan chan *DataType, errorChan chan error, unsubscribeChan chan struct{}) error {
 	//use locks to avoid concurrent access to the SubscriptionDataReader (from different goroutines calling GetTypedResponseChannels at the same time)
 	sdr.lock.Lock()
 	defer sdr.lock.Unlock()
@@ -331,6 +332,9 @@ func GetTypedSubscriptionDataOnChannels[DataType any](sdr *SubscriptionDataReade
 				errorChan <- err
 
 			} else { //if error channel is closed
+				if unsubscribeChan != nil { //if an unsubscribeChan was specified
+					unsubscribeChan <- struct{}{} //notify the unsubscription by sending an empty struct on it
+				}
 				return //kill this goroutine
 			}
 		}

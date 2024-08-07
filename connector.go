@@ -1018,8 +1018,8 @@ func (wsc *websocketConnector) reset() {
 		//send the connection down error to response readers of both standard and persistent subscriptions (even if they're paused)
 		subDataReader.errorChan <- WS_CONNECTION_DOWN_ERROR
 
-		//destroy standard subscriptions only
-		if !subDataReader.persistent {
+		//destroy standard subscriptions only if this is a reset procedure (but if the connector has been closed, destroy persistent subscriptions too)
+		if !subDataReader.persistent || wsc.closing {
 			subDataReader.closeChannels()
 			delete(wsc.mapSentSubIdToSubDataReader, subId)
 		}

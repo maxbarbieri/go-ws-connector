@@ -56,6 +56,9 @@ type ClientConnector interface {
 	// It does not return an error if the specified subId is unknown.
 	Unsubscribe(subId uint64) error
 
+	// UnsubscribeAll is the same as calling Unsubscribe on all subscriptions that are currently open on the connector.
+	UnsubscribeAll() error
+
 	// PauseSubscription pauses the subscription identified by the specified subId.
 	// It works just like an unsubscription, but when the "special message" marked as the last one is received, even though
 	// it is still processed and sent to the subscriber over the response channel, it does not trigger the destruction of the
@@ -814,6 +817,32 @@ func (wsc *websocketConnector) unsubscribe(subId uint64, pause bool) error {
 
 func (wsc *websocketConnector) Unsubscribe(subId uint64) error {
 	return wsc.unsubscribe(subId, false)
+}
+
+func (wsc *websocketConnector) UnsubscribeAll() error {
+	//process outgoing unsubscription requests only if the connection is active (and delay reset procedure if someone is sending an unsubscription request)
+	if wsc.ongoingResetLock.TryRLock() {
+		defer wsc.ongoingResetLock.RUnlock()
+
+		wsc.mapSentSubIdToSubDataReaderLock.Lock()
+		for subId, subDataReader := range wsc.mapSentSubIdToSubDataReader {
+			//close the channels and remove the subscription data reader from the map
+			subDataReader.closeChannels()
+			delete(wsc.mapSentSubIdToSubDataReader, subId)
+
+			if !subDataReader.paused { //if the subscription is not paused
+				//send the unsubscribe request message to the outgoing messages handler and set the unsubscribing flag
+				subDataReader.unsubscribing = true
+				wsc.outgoingWsMsgChan <- &wsSentMessage{Type: unsubscriptionRequest, Id: subId}
+			}
+		}
+		wsc.mapSentSubIdToSubDataReaderLock.Unlock()
+
+		return nil
+
+	} else { //if there is an ongoing reset procedure
+		return WS_CONNECTION_DOWN_ERROR
+	}
 }
 
 func (wsc *websocketConnector) PauseSubscription(subId uint64) error {

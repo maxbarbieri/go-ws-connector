@@ -1,6 +1,7 @@
 package ws_connector
 
 import (
+	"encoding/json"
 	"fmt"
 	jsoniter "github.com/json-iterator/go"
 	"sync"
@@ -11,10 +12,10 @@ import (
 */
 
 type RequestReader struct {
-	reqData jsoniter.RawMessage
+	reqData json.RawMessage
 }
 
-func (rr *RequestReader) GetRawRequestData() jsoniter.RawMessage {
+func (rr *RequestReader) GetRawRequestData() json.RawMessage {
 	return rr.reqData
 }
 
@@ -32,7 +33,7 @@ func GetTypedRequestData[RequestType any](rr *RequestReader) (*RequestType, erro
 */
 
 type SubscriptionRequestReader struct {
-	subscriptionRequestDataChan            chan jsoniter.RawMessage
+	subscriptionRequestDataChan            chan json.RawMessage
 	channelsRequested                      bool
 	typedSubscriptionRequestChanBufferSize int
 	errorChan                              chan error
@@ -51,7 +52,7 @@ func (srr *SubscriptionRequestReader) closeChannels() {
 	}
 }
 
-func (srr *SubscriptionRequestReader) GetRawSubscriptionRequestChannels() (chan jsoniter.RawMessage, chan error, error) {
+func (srr *SubscriptionRequestReader) GetRawSubscriptionRequestChannels() (chan json.RawMessage, chan error, error) {
 	//use locks to avoid concurrent access to the SubscriptionRequestReader
 	srr.lock.Lock()
 	defer srr.lock.Unlock()
@@ -115,7 +116,7 @@ func GetTypedSubscriptionRequestChannels[SubscriptionRequestType any](srr *Subsc
 
 type ResponseReader struct {
 	method            string
-	responseChan      chan jsoniter.RawMessage
+	responseChan      chan json.RawMessage
 	errorChan         chan error
 	channelsRequested bool
 	channelsClosed    bool
@@ -134,7 +135,7 @@ func (rr *ResponseReader) closeChannels() {
 }
 
 // GetRawResponseChannels note that both channels returned by this function are closed by the WsConnector as soon as they're not needed anymore, handle channel open flag accordingly!
-func (rr *ResponseReader) GetRawResponseChannels() (chan jsoniter.RawMessage, chan error, error) {
+func (rr *ResponseReader) GetRawResponseChannels() (chan json.RawMessage, chan error, error) {
 	//use locks to avoid concurrent access to the ResponseReader (from different goroutines calling GetTypedResponseChannels at the same time)
 	rr.lock.Lock()
 	defer rr.lock.Unlock()
@@ -170,7 +171,7 @@ func GetTypedResponseOnChannels[ResponseType any](rr *ResponseReader, typedRespo
 	//create two goroutines that "translate" the incoming responses and errors
 
 	go func() {
-		var rawJsonResponse jsoniter.RawMessage
+		var rawJsonResponse json.RawMessage
 		var chanOpen bool
 		for {
 			rawJsonResponse, chanOpen = <-rr.responseChan
@@ -262,7 +263,7 @@ type SubscriptionDataReader struct {
 	persistent                  bool
 	paused                      bool
 	unsubscribing               bool
-	dataChan                    chan jsoniter.RawMessage
+	dataChan                    chan json.RawMessage
 	errorChan                   chan error
 	typedDataChanBufferSize     int
 	channelsRequested           bool
@@ -281,7 +282,7 @@ func (sdr *SubscriptionDataReader) closeChannels() {
 	}
 }
 
-func (sdr *SubscriptionDataReader) GetRawSubscriptionDataChannels() (chan jsoniter.RawMessage, chan error, error) {
+func (sdr *SubscriptionDataReader) GetRawSubscriptionDataChannels() (chan json.RawMessage, chan error, error) {
 	//use locks to avoid concurrent access to the SubscriptionDataReader (from different goroutines calling GetTypedResponseChannels at the same time)
 	sdr.lock.Lock()
 	defer sdr.lock.Unlock()
@@ -318,7 +319,7 @@ func GetTypedSubscriptionDataOnChannels[DataType any](sdr *SubscriptionDataReade
 	//create two goroutines that "translate" all incoming data and errors
 
 	go func() {
-		var rawJsonData jsoniter.RawMessage
+		var rawJsonData json.RawMessage
 		var chanOpen bool
 		for {
 			rawJsonData, chanOpen = <-sdr.dataChan

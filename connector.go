@@ -1,6 +1,7 @@
 package ws_connector
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/gorilla/websocket"
 	jsoniter "github.com/json-iterator/go"
@@ -431,7 +432,7 @@ func (wsc *websocketConnector) incomingWsMessageHandler() {
 					//create a subscriptionInfo object
 					subInfo := &subscriptionInfo{
 						subscriptionRequestReader: &SubscriptionRequestReader{
-							subscriptionRequestDataChan:            make(chan jsoniter.RawMessage, wsc.subscriptionRequestChanBufferSize),
+							subscriptionRequestDataChan:            make(chan json.RawMessage, wsc.subscriptionRequestChanBufferSize),
 							errorChan:                              make(chan error, wsc.subscriptionRequestChanBufferSize),
 							typedSubscriptionRequestChanBufferSize: wsc.subscriptionRequestChanBufferSize,
 						},
@@ -657,7 +658,7 @@ func (wsc *websocketConnector) SendRequest(method string, data interface{}, requ
 
 			//register response reader
 			responseInfo := &ResponseReader{
-				responseChan: make(chan jsoniter.RawMessage, 1),
+				responseChan: make(chan json.RawMessage, 1),
 				errorChan:    make(chan error, 1),
 			}
 			wsc.mapSentRequestIdToResponseReaderLock.Lock()
@@ -716,7 +717,7 @@ func (wsc *websocketConnector) subscribe(topic string, restoreSubscriptionOnReco
 		//register subscription data reader
 		subDataReader := &SubscriptionDataReader{
 			topic:                   topic,
-			dataChan:                make(chan jsoniter.RawMessage, wsc.responseChanBufferSize),
+			dataChan:                make(chan json.RawMessage, wsc.responseChanBufferSize),
 			errorChan:               make(chan error, wsc.responseChanBufferSize),
 			typedDataChanBufferSize: wsc.responseChanBufferSize,
 		}

@@ -273,7 +273,7 @@ func (wsc *websocketConnector) openClientWsConnection() error {
 	var err error
 	wsc.wsConn, _, err = websocket.DefaultDialer.Dial(wsc.wsUrl, reqHeader)
 	if err != nil {
-		return fmt.Errorf("error in websocket.DefaultDialer.Dial(wsUrl, nil): %s\n", err)
+		return fmt.Errorf("error in websocket.DefaultDialer.Dial(wsUrl, nil): %s", err)
 	}
 
 	return nil

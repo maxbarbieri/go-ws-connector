@@ -73,7 +73,7 @@ type ClientConnector interface {
 	ResumeSubscription(subId uint64) error
 
 	// Close closes the connector and the underlying websocket connection
-	Close(force bool)
+	Close()
 }
 
 type ServerConnector interface {
@@ -123,7 +123,7 @@ type ServerConnector interface {
 	ResumeSubscription(subId uint64) error
 
 	// Close closes the connector and the underlying websocket connection
-	Close(force bool)
+	Close()
 }
 
 // Connector generic connector interface, which has all the methods of the ServerConnector, which
@@ -932,16 +932,14 @@ func (wsc *websocketConnector) removeSubscriptionRequestInfo(subId uint64, lock 
 	delete(wsc.mapReceivedSubIdToSubscriptionInfo, subId)
 }
 
-func (wsc *websocketConnector) Close(force bool) {
-	if !force {
-		//wait for any outgoing request to be registered in the maps and sent on the outgoingWsMsgChan,
-		//this lock operation will block any subsequent outgoing requests, so we can safely close everything
-		wsc.ongoingResetLock.Lock()
-		//do not defer the unlock, since this wsConnector is being closed and can't be re-used
-	}
-
+func (wsc *websocketConnector) Close() {
 	//set the closing flag, to differentiate a connection error from an explicit call to .Close()
 	wsc.closing = true
+
+	//wait for any outgoing request to be registered in the maps and sent on the outgoingWsMsgChan,
+	//this lock operation will block any subsequent outgoing requests, so we can safely close everything
+	wsc.ongoingResetLock.Lock()
+	//do not defer the unlock, since this wsConnector is being closed and can't be re-used
 
 	//close the websocket connection (this will kill the incomingWsMessageReader goroutine, and also trigger the reset
 	//procedure, with a different behavior since the wsc.closing flag has been set)
@@ -949,6 +947,7 @@ func (wsc *websocketConnector) Close(force bool) {
 }
 
 func (wsc *websocketConnector) reset() {
+	//note that the closing flag may change during the execution of this reset procedure (for example, if Close() is called right after the connection goes down)
 	if !wsc.closing { //if this reset procedure is being executed due to a connection error
 		//close the websocket connection (this will kill the incomingWsMessageReader goroutine, if it's still active)
 		//no need to close the websocket connection if the connector is closing, since the connector's .Close() method
@@ -963,7 +962,9 @@ func (wsc *websocketConnector) reset() {
 			if wsc.connFailedCallback != nil { //if a callback has been specified
 				//call it (in a separate goroutine) when the function returns
 				defer func() {
-					go wsc.connFailedCallback(wsc)
+					if !wsc.closing {
+						go wsc.connFailedCallback(wsc)
+					}
 				}()
 			}
 
@@ -975,7 +976,9 @@ func (wsc *websocketConnector) reset() {
 			if wsc.connRestoredCallback != nil { //if a conn restored callback has been specified
 				//call it (in a separate goroutine) when the function returns
 				defer func() {
-					go wsc.connRestoredCallback(wsc)
+					if !wsc.closing {
+						go wsc.connRestoredCallback(wsc)
+					}
 				}()
 			}
 		}
@@ -1004,6 +1007,65 @@ func (wsc *websocketConnector) reset() {
 	//at this point we are sure that no one will send anything on outgoingWsMsgChan, so we can close it
 	close(wsc.outgoingWsMsgChan)
 
+	wsc.closeSendersRespondersAndReaders()
+
+	if !wsc.closing { //if this is a "reset" procedure and not the result of a call to .Close()
+		//create a new resetOnce to allow a subsequent reset procedure
+		wsc.resetOnce = &sync.Once{}
+
+		if wsc.wsUrl == "" { //if this is a server websocket connector
+			log.Warningf("[%s][ResetProcedure] Destroying connector\n", wsc.logTag)
+
+		} else { //if this is a client websocket connector
+			log.Warningf("[%s][ResetProcedure] Re-connecting...\n", wsc.logTag)
+
+			//remake the internal channels, to discard all previous unprocessed messages, if any
+			wsc.incomingWsMsgChan = make(chan *wsReceivedMessage, wsc.incomingMsgChanBufferSize)
+			wsc.outgoingWsMsgChan = make(chan *wsSentMessage, wsc.outgoingMsgChanBufferSize)
+
+			//open ws connection
+			err := wsc.openClientWsConnection()
+			for err != nil {
+				log.Warningf("[%s][ResetProcedure] Error in wsc.openClientWsConnection(): %s | retrying in %d seconds...\n", wsc.logTag, err, wsc.secondsBetweenReconnections)
+
+				//wait before reconnection
+				time.Sleep(time.Duration(wsc.secondsBetweenReconnections) * time.Second)
+
+				if wsc.closing { //if during the sleep the closing flag was set to true
+					wsc.closeSendersRespondersAndReaders() //make sure to close all senders, responders and readers
+					return                                 //destroy connector
+				}
+
+				//open ws connection
+				err = wsc.openClientWsConnection()
+			}
+
+			//once websocket has been opened successfully, start goroutines
+			wsc.startGoroutines()
+
+			//restore persistent subscriptions (note that the only subscriptions that remain in mapSentSubIdToSubDataReader
+			//are the persistent ones, since we removed the standard ones earlier in the reset procedure)
+			wsc.mapSentSubIdToSubDataReaderLock.RLock()
+			for subId, subDataReader := range wsc.mapSentSubIdToSubDataReader {
+				if !(subDataReader.paused || subDataReader.unsubscribing) { //only if not paused or unsubscribing
+					//send subscription request message to the outgoing messages handler, with the same id, method and data as
+					//the latest subscription update of original subscription
+					wsc.outgoingWsMsgChan <- &wsSentMessage{
+						Type:   subscriptionRequest,
+						Id:     subId,
+						Method: subDataReader.topic,
+						Data:   subDataReader.lastSubscriptionRequestData,
+					}
+				}
+			}
+			wsc.mapSentSubIdToSubDataReaderLock.RUnlock()
+
+			log.Warningf("[%s][ResetProcedure] Re-connected...\n", wsc.logTag)
+		}
+	}
+}
+
+func (wsc *websocketConnector) closeSendersRespondersAndReaders() {
 	//close all channels for responses to previously sent requests and delete them from the map
 	//(we can close them because, now that the incomingMsgHandler goroutine is down, no one will send on those channels)
 	wsc.mapSentRequestIdToResponseReaderLock.Lock()
@@ -1053,54 +1115,4 @@ func (wsc *websocketConnector) reset() {
 		wsc.removeSubscriptionRequestInfo(receivedSubId, false) //do not take the mapReceivedSubIdToSubscriptionInfoLock here, since we already locked it outside this for loop
 	}
 	wsc.mapReceivedSubIdToSubscriptionInfoLock.Unlock()
-
-	if !wsc.closing { //if this is a "reset" procedure and not the result of a call to .Close()
-		//create a new resetOnce to allow a subsequent reset procedure
-		wsc.resetOnce = &sync.Once{}
-
-		if wsc.wsUrl == "" { //if this is a server websocket connector
-			log.Warningf("[%s][ResetProcedure] Destroying connector\n", wsc.logTag)
-
-		} else { //if this is a client websocket connector
-			log.Warningf("[%s][ResetProcedure] Re-connecting...\n", wsc.logTag)
-
-			//remake the internal channels, to discard all previous unprocessed messages, if any
-			wsc.incomingWsMsgChan = make(chan *wsReceivedMessage, wsc.incomingMsgChanBufferSize)
-			wsc.outgoingWsMsgChan = make(chan *wsSentMessage, wsc.outgoingMsgChanBufferSize)
-
-			//open ws connection
-			err := wsc.openClientWsConnection()
-			for err != nil {
-				log.Warningf("[%s][ResetProcedure] Error in wsc.openClientWsConnection(): %s | retrying in %d seconds...\n", wsc.logTag, err, wsc.secondsBetweenReconnections)
-
-				//wait before reconnection
-				time.Sleep(time.Duration(wsc.secondsBetweenReconnections) * time.Second)
-
-				//open ws connection
-				err = wsc.openClientWsConnection()
-			}
-
-			//once websocket has been opened successfully, start goroutines
-			wsc.startGoroutines()
-
-			//restore persistent subscriptions (note that the only subscriptions that remain in mapSentSubIdToSubDataReader
-			//are the persistent ones, since we removed the standard ones earlier in the reset procedure)
-			wsc.mapSentSubIdToSubDataReaderLock.RLock()
-			for subId, subDataReader := range wsc.mapSentSubIdToSubDataReader {
-				if !(subDataReader.paused || subDataReader.unsubscribing) { //only if not paused or unsubscribing
-					//send subscription request message to the outgoing messages handler, with the same id, method and data as
-					//the latest subscription update of original subscription
-					wsc.outgoingWsMsgChan <- &wsSentMessage{
-						Type:   subscriptionRequest,
-						Id:     subId,
-						Method: subDataReader.topic,
-						Data:   subDataReader.lastSubscriptionRequestData,
-					}
-				}
-			}
-			wsc.mapSentSubIdToSubDataReaderLock.RUnlock()
-
-			log.Warningf("[%s][ResetProcedure] Re-connected...\n", wsc.logTag)
-		}
-	}
 }

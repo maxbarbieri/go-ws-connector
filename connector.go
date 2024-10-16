@@ -943,7 +943,9 @@ func (wsc *websocketConnector) Close() {
 
 	//close the websocket connection (this will kill the incomingWsMessageReader goroutine, and also trigger the reset
 	//procedure, with a different behavior since the wsc.closing flag has been set)
-	_ = wsc.wsConn.Close()
+	if wsc.wsConn != nil {
+		_ = wsc.wsConn.Close()
+	}
 }
 
 func (wsc *websocketConnector) reset() {
@@ -952,7 +954,9 @@ func (wsc *websocketConnector) reset() {
 		//close the websocket connection (this will kill the incomingWsMessageReader goroutine, if it's still active)
 		//no need to close the websocket connection if the connector is closing, since the connector's .Close() method
 		//already closes the connection (in fact, that's how the reset procedure is triggered when closing a connector)
-		_ = wsc.wsConn.Close()
+		if wsc.wsConn != nil {
+			_ = wsc.wsConn.Close()
+		}
 
 		//we want to call the connFailedCallback or connRestoredCallback as the last thing we do in the reset
 		//procedure, after the ongoingResetLock has been released.

@@ -73,7 +73,7 @@ type ClientConnector interface {
 	ResumeSubscription(subId uint64) error
 
 	// Close closes the connector and the underlying websocket connection
-	Close()
+	Close(force bool)
 }
 
 type ServerConnector interface {
@@ -123,7 +123,7 @@ type ServerConnector interface {
 	ResumeSubscription(subId uint64) error
 
 	// Close closes the connector and the underlying websocket connection
-	Close()
+	Close(force bool)
 }
 
 // Connector generic connector interface, which has all the methods of the ServerConnector, which
@@ -932,11 +932,13 @@ func (wsc *websocketConnector) removeSubscriptionRequestInfo(subId uint64, lock 
 	delete(wsc.mapReceivedSubIdToSubscriptionInfo, subId)
 }
 
-func (wsc *websocketConnector) Close() {
-	//wait for any outgoing request to be registered in the maps and sent on the outgoingWsMsgChan,
-	//this lock operation will block any subsequent outgoing requests, so we can safely close everything
-	wsc.ongoingResetLock.Lock()
-	//do not defer the unlock, since this wsConnector is being closed and can't be re-used
+func (wsc *websocketConnector) Close(force bool) {
+	if !force {
+		//wait for any outgoing request to be registered in the maps and sent on the outgoingWsMsgChan,
+		//this lock operation will block any subsequent outgoing requests, so we can safely close everything
+		wsc.ongoingResetLock.Lock()
+		//do not defer the unlock, since this wsConnector is being closed and can't be re-used
+	}
 
 	//set the closing flag, to differentiate a connection error from an explicit call to .Close()
 	wsc.closing = true

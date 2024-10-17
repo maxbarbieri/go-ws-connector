@@ -5,10 +5,17 @@ import (
 )
 
 type Responder interface {
-	// SendResponse send a response (for the request to which this responder is attached) to the peer on the other side of the websocket connection
+	// SendResponse sends a response (for the request to which this responder is attached) to the peer on the other side of the websocket connection.
 	SendResponse(data interface{}) error
+
+	// SendError sends an error response (for the request to which this responder is attached) to the peer on the other side of the websocket connection.
 	SendError(error error) error
+
+	// GetConnector get a reference to the parent Connector object.
 	GetConnector() Connector
+
+	// ResponseRequired returns true if the request sender wants a response, false if this is a fire&forget request.
+	ResponseRequired() bool
 }
 
 type wsResponder struct {
@@ -102,4 +109,8 @@ func (r *wsResponder) disable() {
 
 func (r *wsResponder) GetConnector() Connector {
 	return r.wsConnector
+}
+
+func (r *wsResponder) ResponseRequired() bool {
+	return r.reqId != 0
 }

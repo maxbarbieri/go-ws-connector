@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	jsoniter "github.com/json-iterator/go"
+	log "github.com/sirupsen/logrus"
 	"sync"
 )
 
@@ -115,6 +116,7 @@ func GetTypedSubscriptionRequestChannels[SubscriptionRequestType any](srr *Subsc
 */
 
 type ResponseReader struct {
+	connectorLogTag   string
 	method            string
 	responseChan      chan json.RawMessage
 	errorChan         chan error
@@ -171,6 +173,13 @@ func GetTypedResponseOnChannels[ResponseType any](rr *ResponseReader, typedRespo
 	//create two goroutines that "translate" the incoming responses and errors
 
 	go func() {
+		//avoid crashing the entire process if the specified channels are closed when writing to it
+		defer func() {
+			if r := recover(); r != nil {
+				log.Warningf("[%s][GetTypedResponseOnChannels][dataChan goroutine] recovered from panic: %+v\n", rr.connectorLogTag, r)
+			}
+		}()
+
 		var rawJsonResponse json.RawMessage
 		var chanOpen bool
 		for {
@@ -191,6 +200,13 @@ func GetTypedResponseOnChannels[ResponseType any](rr *ResponseReader, typedRespo
 	}()
 
 	go func() {
+		//avoid crashing the entire process if the specified channels are closed when writing to it
+		defer func() {
+			if r := recover(); r != nil {
+				log.Warningf("[%s][GetTypedResponseOnChannels][errorChan goroutine] recovered from panic: %+v\n", rr.connectorLogTag, r)
+			}
+		}()
+
 		var err error
 		var chanOpen bool
 		for {
@@ -258,6 +274,7 @@ func GetTypedResponseChannels[ResponseType any](rr *ResponseReader) (chan *Respo
 */
 
 type SubscriptionDataReader struct {
+	connectorLogTag             string
 	topic                       string
 	lastSubscriptionRequestData interface{}
 	persistent                  bool
@@ -319,6 +336,13 @@ func GetTypedSubscriptionDataOnChannels[DataType any](sdr *SubscriptionDataReade
 	//create two goroutines that "translate" all incoming data and errors
 
 	go func() {
+		//avoid crashing the entire process if the specified channels are closed when writing to it
+		defer func() {
+			if r := recover(); r != nil {
+				log.Warningf("[%s][GetTypedSubscriptionDataOnChannels][dataChan goroutine] recovered from panic: %+v\n", sdr.connectorLogTag, r)
+			}
+		}()
+
 		var rawJsonData json.RawMessage
 		var chanOpen bool
 		for {
@@ -339,6 +363,13 @@ func GetTypedSubscriptionDataOnChannels[DataType any](sdr *SubscriptionDataReade
 	}()
 
 	go func() {
+		//avoid crashing the entire process if the specified channel is closed when writing to it
+		defer func() {
+			if r := recover(); r != nil {
+				log.Warningf("[%s][GetTypedSubscriptionDataOnChannels][errorChan goroutine] recovered from panic: %+v\n", sdr.connectorLogTag, r)
+			}
+		}()
+
 		var err error
 		var chanOpen bool
 		for {

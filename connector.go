@@ -658,8 +658,9 @@ func (wsc *websocketConnector) SendRequest(method string, data interface{}, requ
 
 			//register response reader
 			responseInfo := &ResponseReader{
-				responseChan: make(chan json.RawMessage, 1),
-				errorChan:    make(chan error, 1),
+				connectorLogTag: wsc.logTag,
+				responseChan:    make(chan json.RawMessage, 1),
+				errorChan:       make(chan error, 1),
 			}
 			wsc.mapSentRequestIdToResponseReaderLock.Lock()
 			wsc.mapSentRequestIdToResponseReader[reqId] = responseInfo
@@ -716,6 +717,7 @@ func (wsc *websocketConnector) subscribe(topic string, restoreSubscriptionOnReco
 
 		//register subscription data reader
 		subDataReader := &SubscriptionDataReader{
+			connectorLogTag:         wsc.logTag,
 			topic:                   topic,
 			dataChan:                make(chan json.RawMessage, wsc.responseChanBufferSize),
 			errorChan:               make(chan error, wsc.responseChanBufferSize),

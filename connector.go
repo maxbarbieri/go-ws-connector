@@ -507,9 +507,10 @@ func (wsc *websocketConnector) incomingWsMessageHandler() {
 			}
 
 			//if the received message id has an associated response channel in the map
+			//Note that here we're accessing the subDataReader's channels, so we have to
+			//hold the map's lock in read mode until we finish using the subDataReader
 			wsc.mapSentSubIdToSubDataReaderLock.RLock()
 			subDataReader, exists = wsc.mapSentSubIdToSubDataReader[msg.Id]
-			wsc.mapSentSubIdToSubDataReaderLock.RUnlock()
 			if exists {
 				//send data to the correct channel
 				if msg.Error == "" { //no errors
@@ -525,16 +526,21 @@ func (wsc *websocketConnector) incomingWsMessageHandler() {
 				if msg.Last { //if this is marked as the last message of this subscription
 					if !subDataReader.paused { //if the subscription is not paused
 						//close the channels and remove the subscription data reader from the map
-						subDataReader.closeChannels()
-						wsc.mapSentSubIdToSubDataReaderLock.Lock()
-						delete(wsc.mapSentSubIdToSubDataReader, msg.Id)
-						wsc.mapSentSubIdToSubDataReaderLock.Unlock()
+						//in a separate goroutine since we need to lock the map in write mode, but
+						//right now we're holding the lock in read mode.
+						go func(sdr *SubscriptionDataReader, subId uint64) {
+							wsc.mapSentSubIdToSubDataReaderLock.Lock()
+							sdr.closeChannels()
+							delete(wsc.mapSentSubIdToSubDataReader, subId)
+							wsc.mapSentSubIdToSubDataReaderLock.Unlock()
+						}(subDataReader, msg.Id)
 					}
 				}
 
 			} else {
 				log.Warningf("[%s][IncomingWsMsgHandler] Received data for subId not in map (this is normal if the message was sent very close to an Unsubscribe() call on the receiver's side) ignoring it... | msg: %+v\n", wsc.logTag, msg)
 			}
+			wsc.mapSentSubIdToSubDataReaderLock.RUnlock()
 
 		case unsubscriptionRequest:
 			if msg.Id == 0 {
@@ -751,16 +757,18 @@ func (wsc *websocketConnector) UpdateSubscription(subId uint64, data interface{}
 	if wsc.ongoingResetLock.TryRLock() {
 		defer wsc.ongoingResetLock.RUnlock()
 
+		//Note that here we're not accessing the subDataReader's channels, so we don't need
+		//to hold the map's lock in read mode even after retrieving the subDataReader from the map
 		wsc.mapSentSubIdToSubDataReaderLock.RLock()
-		responseReader, exists := wsc.mapSentSubIdToSubDataReader[subId]
+		subDataReader, exists := wsc.mapSentSubIdToSubDataReader[subId]
 		wsc.mapSentSubIdToSubDataReaderLock.RUnlock()
 		if exists { //if the specified subId actually belongs to a registered subscription
-			if responseReader.persistent { //if this is a persistent subscription
+			if subDataReader.persistent { //if this is a persistent subscription
 				//update the latest subscription request data, so the most recent subscription request is available in case of reconnection
-				responseReader.lastSubscriptionRequestData = data
+				subDataReader.lastSubscriptionRequestData = data
 			}
 
-			if !responseReader.paused { //if the subscription is not paused
+			if !subDataReader.paused { //if the subscription is not paused
 				//send message to the outgoing messages handler
 				wsc.outgoingWsMsgChan <- &wsSentMessage{
 					Type: subscriptionRequest,
@@ -783,6 +791,8 @@ func (wsc *websocketConnector) unsubscribe(subId uint64, pause bool) error {
 	if wsc.ongoingResetLock.TryRLock() {
 		defer wsc.ongoingResetLock.RUnlock()
 
+		//Note that here we're not accessing the subDataReader's channels, so we don't need
+		//to hold the map's lock in read mode even after retrieving the subDataReader from the map
 		wsc.mapSentSubIdToSubDataReaderLock.RLock()
 		subDataReader, exists := wsc.mapSentSubIdToSubDataReader[subId]
 		wsc.mapSentSubIdToSubDataReaderLock.RUnlock()
@@ -798,8 +808,8 @@ func (wsc *websocketConnector) unsubscribe(subId uint64, pause bool) error {
 
 			} else { //unsubscription request
 				//close the channels and remove the subscription data reader from the map
-				subDataReader.closeChannels()
 				wsc.mapSentSubIdToSubDataReaderLock.Lock()
+				subDataReader.closeChannels()
 				delete(wsc.mapSentSubIdToSubDataReader, subId)
 				wsc.mapSentSubIdToSubDataReaderLock.Unlock()
 
@@ -857,6 +867,8 @@ func (wsc *websocketConnector) ResumeSubscription(subId uint64) error {
 	if wsc.ongoingResetLock.TryRLock() {
 		defer wsc.ongoingResetLock.RUnlock()
 
+		//Note that here we're not accessing the subDataReader's channels, so we don't need
+		//to hold the map's lock in read mode even after retrieving the subDataReader from the map
 		wsc.mapSentSubIdToSubDataReaderLock.RLock()
 		responseReader, exists := wsc.mapSentSubIdToSubDataReader[subId]
 		wsc.mapSentSubIdToSubDataReaderLock.RUnlock()

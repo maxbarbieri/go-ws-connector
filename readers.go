@@ -6,6 +6,7 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	log "github.com/sirupsen/logrus"
 	"sync"
+	"sync/atomic"
 )
 
 /*
@@ -40,6 +41,9 @@ type SubscriptionRequestReader struct {
 	errorChan                              chan error
 	channelsClosed                         bool
 	lock                                   sync.Mutex
+
+	reqDataChanPrevQueue int
+	errChanPrevQueue     atomic.Int64
 }
 
 func (srr *SubscriptionRequestReader) closeChannels() {
@@ -83,6 +87,7 @@ func GetTypedSubscriptionRequestChannels[SubscriptionRequestType any](srr *Subsc
 
 	//create a goroutine that "translates" all incoming subscription requests
 	go func() {
+		var typedChanPrevQueue int
 		for {
 			subReqData, chanOpen := <-srr.subscriptionRequestDataChan
 			if chanOpen {
@@ -90,12 +95,23 @@ func GetTypedSubscriptionRequestChannels[SubscriptionRequestType any](srr *Subsc
 				err := jsoniter.ConfigFastest.Unmarshal(subReqData, &obj)
 				if err == nil { //no error
 					typedChan <- &obj
+
+					if typedChanPrevQueue != len(typedChan) && len(typedChan)%10 == 0 {
+						log.Warningf("[GetTypedSubscriptionRequestChannels] typedChan queue: %d\n", len(typedChan))
+						typedChanPrevQueue = len(typedChan)
+					}
+
 				} else { //error
 					//we need the lock to correctly check whether the source error channel is closed or not
 					//(note that this is a separate goroutine, not the same one that called GetTypedResponseChannels)
 					srr.lock.Lock()
 					if !srr.channelsClosed {
 						srr.errorChan <- fmt.Errorf("error in jsoniter.Unmarshal(subReqData, &obj): %s", err)
+
+						if int(srr.errChanPrevQueue.Load()) != len(srr.errorChan) && len(srr.errorChan)%10 == 0 {
+							log.Warningf("[GetTypedSubscriptionRequestChannels] srr.errorChan queue: %d\n", len(srr.errorChan))
+							srr.errChanPrevQueue.Store(int64(len(srr.errorChan)))
+						}
 					}
 					srr.lock.Unlock()
 				}
@@ -123,6 +139,9 @@ type ResponseReader struct {
 	channelsRequested bool
 	channelsClosed    bool
 	lock              sync.Mutex
+
+	resChanPrevQueue int
+	errChanPrevQueue atomic.Int64
 }
 
 func (rr *ResponseReader) closeChannels() {
@@ -172,6 +191,8 @@ func GetTypedResponseOnChannels[ResponseType any](rr *ResponseReader, typedRespo
 
 	//create two goroutines that "translate" the incoming responses and errors
 
+	var errChanPrevQueue atomic.Int64
+
 	go func() {
 		//avoid crashing the entire process if the specified channels are closed when writing to it
 		defer func() {
@@ -182,6 +203,7 @@ func GetTypedResponseOnChannels[ResponseType any](rr *ResponseReader, typedRespo
 
 		var rawJsonResponse json.RawMessage
 		var chanOpen bool
+		var typedChanPrevQueue int
 		for {
 			rawJsonResponse, chanOpen = <-rr.responseChan
 			if chanOpen {
@@ -189,8 +211,19 @@ func GetTypedResponseOnChannels[ResponseType any](rr *ResponseReader, typedRespo
 				err := jsoniter.ConfigFastest.Unmarshal(rawJsonResponse, &obj)
 				if err == nil { //no error
 					typedResponseChan <- &obj
+
+					if typedChanPrevQueue != len(typedResponseChan) && len(typedResponseChan)%10 == 0 {
+						log.Warningf("[GetTypedResponseOnChannels] typedResponseChan queue: %d | method: %s\n", len(typedResponseChan), rr.method)
+						typedChanPrevQueue = len(typedResponseChan)
+					}
+
 				} else { //error
 					errorChan <- fmt.Errorf("error in jsoniter.Unmarshal(rawJsonResponse, &obj): %s", err)
+
+					if int(errChanPrevQueue.Load()) != len(errorChan) && len(errorChan)%10 == 0 {
+						log.Warningf("[GetTypedResponseOnChannels] errorChan queue: %d | method: %s\n", len(errorChan), rr.method)
+						errChanPrevQueue.Store(int64(len(errorChan)))
+					}
 				}
 
 			} else { //if response channel is closed
@@ -213,6 +246,11 @@ func GetTypedResponseOnChannels[ResponseType any](rr *ResponseReader, typedRespo
 			err, chanOpen = <-rr.errorChan
 			if chanOpen {
 				errorChan <- err
+
+				if int(errChanPrevQueue.Load()) != len(errorChan) && len(errorChan)%10 == 0 {
+					log.Warningf("[GetTypedResponseOnChannels] errorChan queue: %d | method: %s\n", len(errorChan), rr.method)
+					errChanPrevQueue.Store(int64(len(errorChan)))
+				}
 
 			} else { //if error channel is closed
 				return //kill this goroutine
@@ -240,6 +278,7 @@ func GetTypedResponseChannels[ResponseType any](rr *ResponseReader) (chan *Respo
 
 	//create a goroutine that "translates" the incoming responses
 	go func() {
+		var typedChanPrevQueue int
 		for {
 			rawJsonResponse, chanOpen := <-rr.responseChan
 			if chanOpen {
@@ -248,12 +287,22 @@ func GetTypedResponseChannels[ResponseType any](rr *ResponseReader) (chan *Respo
 				if err == nil { //no error
 					typedResponseChan <- &obj
 
+					if typedChanPrevQueue != len(typedResponseChan) && len(typedResponseChan)%10 == 0 {
+						log.Warningf("[GetTypedResponseChannels] typedResponseChan queue: %d | method: %s\n", len(typedResponseChan), rr.method)
+						typedChanPrevQueue = len(typedResponseChan)
+					}
+
 				} else { //error
 					//we need the lock to correctly check whether the source error channel is closed or not
 					//(note that this is a separate goroutine, not the same one that called GetTypedResponseChannels)
 					rr.lock.Lock()
 					if !rr.channelsClosed {
 						rr.errorChan <- fmt.Errorf("error in jsoniter.Unmarshal(rawJsonResponse, &obj): %s", err)
+
+						if int(rr.errChanPrevQueue.Load()) != len(rr.errorChan) && len(rr.errorChan)%10 == 0 {
+							log.Warningf("[GetTypedResponseChannels] rr.errorChan queue: %d | method: %s\n", len(rr.errorChan), rr.method)
+							rr.errChanPrevQueue.Store(int64(len(rr.errorChan)))
+						}
 					}
 					rr.lock.Unlock()
 				}
@@ -286,6 +335,9 @@ type SubscriptionDataReader struct {
 	channelsRequested           bool
 	channelsClosed              bool
 	lock                        sync.Mutex
+
+	dataChanPrevQueue int
+	errChanPrevQueue  atomic.Int64
 }
 
 func (sdr *SubscriptionDataReader) closeChannels() {
@@ -335,6 +387,8 @@ func GetTypedSubscriptionDataOnChannels[DataType any](sdr *SubscriptionDataReade
 
 	//create two goroutines that "translate" all incoming data and errors
 
+	var errChanPrevQueue atomic.Int64
+
 	go func() {
 		//avoid crashing the entire process if the specified channels are closed when writing to it
 		defer func() {
@@ -345,6 +399,7 @@ func GetTypedSubscriptionDataOnChannels[DataType any](sdr *SubscriptionDataReade
 
 		var rawJsonData json.RawMessage
 		var chanOpen bool
+		var typedChanPrevQueue int
 		for {
 			rawJsonData, chanOpen = <-sdr.dataChan
 			if chanOpen {
@@ -352,8 +407,19 @@ func GetTypedSubscriptionDataOnChannels[DataType any](sdr *SubscriptionDataReade
 				err := jsoniter.ConfigFastest.Unmarshal(rawJsonData, &obj)
 				if err == nil { //no error
 					typedDataChan <- &obj
+
+					if typedChanPrevQueue != len(typedDataChan) && len(typedDataChan)%10 == 0 {
+						log.Warningf("[GetTypedSubscriptionDataOnChannels] typedDataChan queue: %d | topic: %s\n", len(typedDataChan), sdr.topic)
+						typedChanPrevQueue = len(typedDataChan)
+					}
+
 				} else { //error
 					errorChan <- fmt.Errorf("error in jsoniter.Unmarshal(rawJsonData, &obj): %s", err)
+
+					if int(errChanPrevQueue.Load()) != len(errorChan) && len(errorChan)%10 == 0 {
+						log.Warningf("[GetTypedSubscriptionDataOnChannels] errorChan queue: %d | topic: %s\n", len(errorChan), sdr.topic)
+						errChanPrevQueue.Store(int64(len(errorChan)))
+					}
 				}
 
 			} else { //if data channel is closed
@@ -377,9 +443,16 @@ func GetTypedSubscriptionDataOnChannels[DataType any](sdr *SubscriptionDataReade
 			if chanOpen {
 				errorChan <- err
 
+				if int(errChanPrevQueue.Load()) != len(errorChan) && len(errorChan)%10 == 0 {
+					log.Warningf("[GetTypedSubscriptionDataOnChannels] errorChan queue: %d | topic: %s\n", len(errorChan), sdr.topic)
+					errChanPrevQueue.Store(int64(len(errorChan)))
+				}
+
 			} else { //if error channel is closed
 				if unsubscribeChan != nil { //if an unsubscribeChan was specified
+					log.Debugf("[GetTypedSubscriptionDataOnChannels] unsubscribeChan is not nil, sending an empty struct on it\n")
 					unsubscribeChan <- struct{}{} //notify the unsubscription by sending an empty struct on it
+					log.Debugf("[GetTypedSubscriptionDataOnChannels] sent an empty struct on unsubscribeChan\n")
 				}
 				return //kill this goroutine
 			}
@@ -406,6 +479,7 @@ func GetTypedSubscriptionDataChannels[DataType any](sdr *SubscriptionDataReader)
 
 	//create a goroutine that "translates" all incoming data
 	go func() {
+		var typedChanPrevQueue int
 		for {
 			rawJsonData, chanOpen := <-sdr.dataChan
 			if chanOpen {
@@ -414,12 +488,22 @@ func GetTypedSubscriptionDataChannels[DataType any](sdr *SubscriptionDataReader)
 				if err == nil { //no error
 					typedDataChan <- &obj
 
+					if typedChanPrevQueue != len(typedDataChan) && len(typedDataChan)%10 == 0 {
+						log.Warningf("[GetTypedSubscriptionDataChannels] typedDataChan queue: %d\n", len(typedDataChan))
+						typedChanPrevQueue = len(typedDataChan)
+					}
+
 				} else { //error
 					//we need the lock to correctly check whether the source error channel is closed or not
 					//(note that this is a separate goroutine, not the same one that called GetTypedResponseChannels)
 					sdr.lock.Lock()
 					if !sdr.channelsClosed {
 						sdr.errorChan <- fmt.Errorf("error in jsoniter.Unmarshal(rawJsonData, &obj): %s", err)
+
+						if int(sdr.errChanPrevQueue.Load()) != len(sdr.errorChan) && len(sdr.errorChan)%10 == 0 {
+							log.Warningf("[GetTypedSubscriptionDataChannels] sdr.errorChan queue: %d\n", len(sdr.errorChan))
+							sdr.errChanPrevQueue.Store(int64(len(sdr.errorChan)))
+						}
 					}
 					sdr.lock.Unlock()
 				}

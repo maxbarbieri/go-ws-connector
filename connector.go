@@ -335,6 +335,7 @@ func (wsc *websocketConnector) incomingWsMessageHandler() {
 	var subscriptionToUnsubscribe, prevActiveSubInfo *subscriptionInfo
 	var exists bool
 	var chanOpen bool
+	var prevQueue int
 
 	for {
 		//get next message from peer
@@ -343,6 +344,11 @@ func (wsc *websocketConnector) incomingWsMessageHandler() {
 			//the incomingWsMsgChan is closed only by the incomingWsMessageReader goroutine, which already triggers the
 			//reset procedure if needed, so here we just have to kill this goroutine
 			return
+		}
+
+		if prevQueue != len(wsc.incomingWsMsgChan) && len(wsc.incomingWsMsgChan)%10 == 0 {
+			log.Warningf("[%s][IncomingWsMsgHandler] incomingWsMsgChan queue: %d\n", wsc.logTag, len(wsc.incomingWsMsgChan))
+			prevQueue = len(wsc.incomingWsMsgChan)
 		}
 
 		switch msg.Type {
@@ -424,6 +430,11 @@ func (wsc *websocketConnector) incomingWsMessageHandler() {
 				//send this message to the already active handler through the appropriate channel
 				prevActiveSubInfo.subscriptionRequestReader.subscriptionRequestDataChan <- msg.Data
 
+				if prevActiveSubInfo.subscriptionRequestReader.reqDataChanPrevQueue != len(prevActiveSubInfo.subscriptionRequestReader.subscriptionRequestDataChan) && len(prevActiveSubInfo.subscriptionRequestReader.subscriptionRequestDataChan)%10 == 0 {
+					log.Warningf("[%s][IncomingWsMsgHandler] prevActiveSubInfo.subscriptionRequestReader.subscriptionRequestDataChan queue: %d | topic: %s | subId: %d\n", wsc.logTag, len(prevActiveSubInfo.subscriptionRequestReader.subscriptionRequestDataChan), prevActiveSubInfo.sender.topic, prevActiveSubInfo.sender.subId)
+					prevActiveSubInfo.subscriptionRequestReader.reqDataChanPrevQueue = len(prevActiveSubInfo.subscriptionRequestReader.subscriptionRequestDataChan)
+				}
+
 			} else { //if this is a new subscription request
 				wsc.mapReceivedSubscriptionMethodToHandlerLock.RLock()
 				subHandler, exists = wsc.mapReceivedSubscriptionMethodToHandler[msg.Method]
@@ -484,10 +495,20 @@ func (wsc *websocketConnector) incomingWsMessageHandler() {
 					//send data on the response channel
 					if msg.Data != nil { //but only if the data is not nil
 						responseReader.responseChan <- msg.Data
+
+						if responseReader.resChanPrevQueue != len(responseReader.responseChan) && len(responseReader.responseChan)%10 == 0 {
+							log.Warningf("[%s][IncomingWsMsgHandler] responseReader.responseChan queue: %d | method: %s\n", wsc.logTag, len(responseReader.responseChan), responseReader.method)
+							responseReader.resChanPrevQueue = len(responseReader.responseChan)
+						}
 					}
 
 				} else { //if an error was sent
 					responseReader.errorChan <- fmt.Errorf(msg.Error) //send error on error channel
+
+					if int(responseReader.errChanPrevQueue.Load()) != len(responseReader.errorChan) && len(responseReader.errorChan)%10 == 0 {
+						log.Warningf("[%s][IncomingWsMsgHandler] responseReader.errorChan queue: %d | method: %s\n", wsc.logTag, len(responseReader.errorChan), responseReader.method)
+						responseReader.errChanPrevQueue.Store(int64(len(responseReader.errorChan)))
+					}
 				}
 
 				//close the channels and remove the response reader from the map
@@ -517,10 +538,20 @@ func (wsc *websocketConnector) incomingWsMessageHandler() {
 					//send data on the data channel
 					if msg.Data != nil { //but only if the data is not nil
 						subDataReader.dataChan <- msg.Data
+
+						if subDataReader.dataChanPrevQueue != len(subDataReader.dataChan) && len(subDataReader.dataChan)%10 == 0 {
+							log.Warningf("[%s][IncomingWsMsgHandler] subDataReader.dataChan queue: %d | topic: %s\n", wsc.logTag, len(subDataReader.dataChan), subDataReader.topic)
+							subDataReader.dataChanPrevQueue = len(subDataReader.dataChan)
+						}
 					}
 
 				} else { //if an error was sent
 					subDataReader.errorChan <- fmt.Errorf(msg.Error)
+
+					if int(subDataReader.errChanPrevQueue.Load()) != len(subDataReader.errorChan) && len(subDataReader.errorChan)%10 == 0 {
+						log.Warningf("[%s][IncomingWsMsgHandler] subDataReader.errorChan queue: %d | topic: %s\n", wsc.logTag, len(subDataReader.errorChan), subDataReader.topic)
+						subDataReader.errChanPrevQueue.Store(int64(len(subDataReader.errorChan)))
+					}
 				}
 
 				if msg.Last { //if this is marked as the last message of this subscription
@@ -578,6 +609,7 @@ func (wsc *websocketConnector) outgoingWsMessageWriter() {
 	var msg *wsSentMessage
 	var msgBytes []byte
 	var err error
+	var prevQueue int
 
 	for {
 		//get next message that has to be sent to the peer
@@ -588,6 +620,11 @@ func (wsc *websocketConnector) outgoingWsMessageWriter() {
 			//note that msg is the message read from the outgoingWsMsgChan, so it's the wrapped wsMessage
 			//(with the "envelope", not just the payload, it must always be != nil for actual messages to send)
 			return
+		}
+
+		if prevQueue != len(wsc.outgoingWsMsgChan) && len(wsc.outgoingWsMsgChan)%10 == 0 {
+			log.Warningf("[%s][OutgoingWsMsgHandler] outgoingWsMsgChan queue: %d\n", wsc.logTag, len(wsc.outgoingWsMsgChan))
+			prevQueue = len(wsc.outgoingWsMsgChan)
 		}
 
 		msgBytes, err = jsoniter.ConfigFastest.Marshal(msg)

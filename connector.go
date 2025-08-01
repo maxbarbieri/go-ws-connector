@@ -551,8 +551,8 @@ func (wsc *websocketConnector) incomingWsMessageHandler() {
 							subDataReader.dataChanPrevQueue = len(subDataReader.dataChan)
 						}
 
-					} else {
-						log.Warningf("[%s][IncomingWsMsgHandler] Received subscriptionData msg with nil payload and nil error, ignoring it... | topic: %s | msg: %+v\n", wsc.logTag, msg.Method, msg)
+					} else if !msg.Last {
+						log.Warningf("[%s][IncomingWsMsgHandler] Received subscriptionData msg with nil payload, nil error and last flag set to false | subId: %d | topic: %s | msg: %+v\n", wsc.logTag, msg.Id, msg.Method, msg)
 					}
 
 				} else { //if an error was sent
@@ -570,11 +570,16 @@ func (wsc *websocketConnector) incomingWsMessageHandler() {
 						//in a separate goroutine since we need to lock the map in write mode, but
 						//right now we're holding the lock in read mode.
 						go func(sdr *SubscriptionDataReader, subId uint64) {
+							log.Debugf("[%s][IncomingWsMsgHandler] Received last subscriptionData msg for active subscription, closing subDataReader... | subId: %d | topic: %s\n", wsc.logTag, subId, sdr.topic)
 							wsc.mapSentSubIdToSubDataReaderLock.Lock()
 							sdr.closeChannels()
 							delete(wsc.mapSentSubIdToSubDataReader, subId)
 							wsc.mapSentSubIdToSubDataReaderLock.Unlock()
+							log.Debugf("[%s][IncomingWsMsgHandler] Received last subscriptionData msg for active subscription, subDataReader closed | subId: %d | topic: %s\n", wsc.logTag, subId, sdr.topic)
 						}(subDataReader, msg.Id)
+
+					} else {
+						log.Debugf("[%s][IncomingWsMsgHandler] Received last subscriptionData msg for paused subscription | subId: %d | topic: %s | msg: %+v\n", wsc.logTag, msg.Id, msg.Method, msg)
 					}
 				}
 

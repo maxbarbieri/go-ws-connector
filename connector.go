@@ -337,18 +337,25 @@ func (wsc *websocketConnector) incomingWsMessageHandler() {
 	var chanOpen bool
 	var prevQueue int
 
-	for {
-		//get next message from peer
-		msg, chanOpen = <-wsc.incomingWsMsgChan
-		if !chanOpen { //if the incomingWsMessageReader goroutine has died
-			//the incomingWsMsgChan is closed only by the incomingWsMessageReader goroutine, which already triggers the
-			//reset procedure if needed, so here we just have to kill this goroutine
-			return
-		}
+	heartbeatTicker := time.NewTicker(30 * time.Second)
 
-		if prevQueue != len(wsc.incomingWsMsgChan) && len(wsc.incomingWsMsgChan)%10 == 0 {
-			log.Warningf("[%s][IncomingWsMsgHandler] incomingWsMsgChan queue: %d\n", wsc.logTag, len(wsc.incomingWsMsgChan))
-			prevQueue = len(wsc.incomingWsMsgChan)
+	for {
+		select {
+		case <-heartbeatTicker.C:
+			log.Debugf("[%s][IncomingWsMsgHandler] goroutine still alive\n", wsc.logTag)
+			continue
+
+		case msg, chanOpen = <-wsc.incomingWsMsgChan: //get next message from peer
+			if !chanOpen { //if the incomingWsMessageReader goroutine has died
+				//the incomingWsMsgChan is closed only by the incomingWsMessageReader goroutine, which already triggers the
+				//reset procedure if needed, so here we just have to kill this goroutine
+				return
+			}
+
+			if prevQueue != len(wsc.incomingWsMsgChan) && len(wsc.incomingWsMsgChan)%10 == 0 {
+				log.Warningf("[%s][IncomingWsMsgHandler] incomingWsMsgChan queue: %d\n", wsc.logTag, len(wsc.incomingWsMsgChan))
+				prevQueue = len(wsc.incomingWsMsgChan)
+			}
 		}
 
 		switch msg.Type {
@@ -543,6 +550,9 @@ func (wsc *websocketConnector) incomingWsMessageHandler() {
 							log.Warningf("[%s][IncomingWsMsgHandler] subDataReader.dataChan queue: %d | topic: %s\n", wsc.logTag, len(subDataReader.dataChan), subDataReader.topic)
 							subDataReader.dataChanPrevQueue = len(subDataReader.dataChan)
 						}
+
+					} else {
+						log.Warningf("[%s][IncomingWsMsgHandler] Received subscriptionData msg with nil payload and nil error, ignoring it... | topic: %s | msg: %+v\n", wsc.logTag, msg.Method, msg)
 					}
 
 				} else { //if an error was sent

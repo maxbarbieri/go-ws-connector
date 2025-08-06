@@ -489,7 +489,7 @@ func GetTypedSubscriptionDataChannels[DataType any](sdr *SubscriptionDataReader)
 					typedDataChan <- &obj
 
 					if typedChanPrevQueue != len(typedDataChan) && len(typedDataChan)%10 == 0 {
-						log.Warningf("[GetTypedSubscriptionDataChannels] typedDataChan queue: %d\n", len(typedDataChan))
+						log.Warningf("[GetTypedSubscriptionDataChannels] typedDataChan queue: %d | topic: %s\n", len(typedDataChan), sdr.topic)
 						typedChanPrevQueue = len(typedDataChan)
 					}
 

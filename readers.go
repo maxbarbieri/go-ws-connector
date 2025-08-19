@@ -409,7 +409,7 @@ func GetTypedSubscriptionDataOnChannels[DataType any](sdr *SubscriptionDataReade
 					typedDataChan <- &obj
 
 					if typedChanPrevQueue != len(typedDataChan) && len(typedDataChan)%10 == 0 {
-						log.Warningf("[GetTypedSubscriptionDataOnChannels] typedDataChan queue: %d | topic: %s\n", len(typedDataChan), sdr.topic)
+						log.Warningf("[%s][GetTypedSubscriptionDataOnChannels] typedDataChan queue: %d | topic: %s\n", sdr.connectorLogTag, len(typedDataChan), sdr.topic)
 						typedChanPrevQueue = len(typedDataChan)
 					}
 
@@ -417,7 +417,7 @@ func GetTypedSubscriptionDataOnChannels[DataType any](sdr *SubscriptionDataReade
 					errorChan <- fmt.Errorf("error in jsoniter.Unmarshal(rawJsonData, &obj): %s", err)
 
 					if int(errChanPrevQueue.Load()) != len(errorChan) && len(errorChan)%10 == 0 {
-						log.Warningf("[GetTypedSubscriptionDataOnChannels] errorChan queue: %d | topic: %s\n", len(errorChan), sdr.topic)
+						log.Warningf("[%s][GetTypedSubscriptionDataOnChannels] errorChan queue: %d | topic: %s\n", sdr.connectorLogTag, len(errorChan), sdr.topic)
 						errChanPrevQueue.Store(int64(len(errorChan)))
 					}
 				}
@@ -444,15 +444,15 @@ func GetTypedSubscriptionDataOnChannels[DataType any](sdr *SubscriptionDataReade
 				errorChan <- err
 
 				if int(errChanPrevQueue.Load()) != len(errorChan) && len(errorChan)%10 == 0 {
-					log.Warningf("[GetTypedSubscriptionDataOnChannels] errorChan queue: %d | topic: %s\n", len(errorChan), sdr.topic)
+					log.Warningf("[%s][GetTypedSubscriptionDataOnChannels] errorChan queue: %d | topic: %s\n", sdr.connectorLogTag, len(errorChan), sdr.topic)
 					errChanPrevQueue.Store(int64(len(errorChan)))
 				}
 
 			} else { //if error channel is closed
 				if unsubscribeChan != nil { //if an unsubscribeChan was specified
-					log.Debugf("[GetTypedSubscriptionDataOnChannels] unsubscribeChan is not nil, sending an empty struct on it\n")
+					log.Debugf("[%s][GetTypedSubscriptionDataOnChannels] unsubscribeChan is not nil, sending an empty struct on it\n", sdr.connectorLogTag)
 					unsubscribeChan <- struct{}{} //notify the unsubscription by sending an empty struct on it
-					log.Debugf("[GetTypedSubscriptionDataOnChannels] sent an empty struct on unsubscribeChan\n")
+					log.Debugf("[%s][GetTypedSubscriptionDataOnChannels] sent an empty struct on unsubscribeChan\n", sdr.connectorLogTag)
 				}
 				return //kill this goroutine
 			}
@@ -489,7 +489,7 @@ func GetTypedSubscriptionDataChannels[DataType any](sdr *SubscriptionDataReader)
 					typedDataChan <- &obj
 
 					if typedChanPrevQueue != len(typedDataChan) && len(typedDataChan)%10 == 0 {
-						log.Warningf("[GetTypedSubscriptionDataChannels] typedDataChan queue: %d | topic: %s\n", len(typedDataChan), sdr.topic)
+						log.Warningf("[%s][GetTypedSubscriptionDataChannels] typedDataChan queue: %d | topic: %s\n", sdr.connectorLogTag, len(typedDataChan), sdr.topic)
 						typedChanPrevQueue = len(typedDataChan)
 					}
 
@@ -501,7 +501,7 @@ func GetTypedSubscriptionDataChannels[DataType any](sdr *SubscriptionDataReader)
 						sdr.errorChan <- fmt.Errorf("error in jsoniter.Unmarshal(rawJsonData, &obj): %s", err)
 
 						if int(sdr.errChanPrevQueue.Load()) != len(sdr.errorChan) && len(sdr.errorChan)%10 == 0 {
-							log.Warningf("[GetTypedSubscriptionDataChannels] sdr.errorChan queue: %d\n", len(sdr.errorChan))
+							log.Warningf("[%s][GetTypedSubscriptionDataChannels] sdr.errorChan queue: %d\n", sdr.connectorLogTag, len(sdr.errorChan))
 							sdr.errChanPrevQueue.Store(int64(len(sdr.errorChan)))
 						}
 					}

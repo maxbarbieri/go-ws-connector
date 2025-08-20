@@ -8,6 +8,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -133,11 +134,12 @@ type Connector ServerConnector
 type websocketConnector struct {
 	logTag string
 
-	wsUrl              string                      //empty string for servers, otherwise it's a client
-	authTokenGenerator func() ([]string, []string) //always nil for servers, for clients it's nil if no authentication is required
-	wsConn             *websocket.Conn
-	incomingWsMsgChan  chan *wsReceivedMessage
-	outgoingWsMsgChan  chan *wsSentMessage
+	wsUrl                      string                      //empty string for servers, otherwise it's a client
+	authTokenGenerator         func() ([]string, []string) //always nil for servers, for clients it's nil if no authentication is required
+	wsConn                     *websocket.Conn
+	incomingWsMsgChan          chan *wsReceivedMessage
+	outgoingWsMsgChan          chan *wsSentMessage
+	outgoingWsMsgChanPrevQueue atomic.Int64
 
 	responseChanBufferSize            int
 	subscriptionRequestChanBufferSize int
@@ -624,7 +626,6 @@ func (wsc *websocketConnector) outgoingWsMessageWriter() {
 	var msg *wsSentMessage
 	var msgBytes []byte
 	var err error
-	var prevQueue int
 
 	for {
 		//get next message that has to be sent to the peer
@@ -635,11 +636,6 @@ func (wsc *websocketConnector) outgoingWsMessageWriter() {
 			//note that msg is the message read from the outgoingWsMsgChan, so it's the wrapped wsMessage
 			//(with the "envelope", not just the payload, it must always be != nil for actual messages to send)
 			return
-		}
-
-		if prevQueue != len(wsc.outgoingWsMsgChan) && len(wsc.outgoingWsMsgChan)%10 == 0 {
-			log.Warningf("[%s][OutgoingWsMsgHandler] outgoingWsMsgChan queue: %d\n", wsc.logTag, len(wsc.outgoingWsMsgChan))
-			prevQueue = len(wsc.outgoingWsMsgChan)
 		}
 
 		msgBytes, err = jsoniter.ConfigFastest.Marshal(msg)

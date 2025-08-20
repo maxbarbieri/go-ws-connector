@@ -1,6 +1,7 @@
 package ws_connector
 
 import (
+	log "github.com/sirupsen/logrus"
 	"sync/atomic"
 )
 
@@ -45,6 +46,11 @@ func (s *wsSender) SendData(data interface{}, last bool) error {
 			Data:   data,
 		}
 
+		if int(s.wsConnector.outgoingWsMsgChanPrevQueue.Load()) != len(s.wsConnector.outgoingWsMsgChan) && len(s.wsConnector.outgoingWsMsgChan)%10 == 0 {
+			log.Warningf("[%s][Sender.SendData] outgoingWsMsgChan queue: %d\n", s.wsConnector.logTag, len(s.wsConnector.outgoingWsMsgChan))
+			s.wsConnector.outgoingWsMsgChanPrevQueue.Store(int64(len(s.wsConnector.outgoingWsMsgChan)))
+		}
+
 		if last { //if this was the last message for this subscription
 			//disable this sender
 			s.disable()
@@ -76,6 +82,11 @@ func (s *wsSender) SendError(error error, last bool) error {
 			Method: s.topic,
 			Error:  error.Error(),
 			Last:   last,
+		}
+
+		if int(s.wsConnector.outgoingWsMsgChanPrevQueue.Load()) != len(s.wsConnector.outgoingWsMsgChan) && len(s.wsConnector.outgoingWsMsgChan)%10 == 0 {
+			log.Warningf("[%s][Sender.SendError] outgoingWsMsgChan queue: %d\n", s.wsConnector.logTag, len(s.wsConnector.outgoingWsMsgChan))
+			s.wsConnector.outgoingWsMsgChanPrevQueue.Store(int64(len(s.wsConnector.outgoingWsMsgChan)))
 		}
 
 		if last { //if this was the last message for this subscription

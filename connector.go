@@ -75,6 +75,8 @@ type ClientConnector interface {
 
 	// Close closes the connector and the underlying websocket connection
 	Close()
+
+	GetLogTag() string
 }
 
 type ServerConnector interface {
@@ -125,6 +127,8 @@ type ServerConnector interface {
 
 	// Close closes the connector and the underlying websocket connection
 	Close()
+
+	GetLogTag() string
 }
 
 // Connector generic connector interface, which has all the methods of the ServerConnector, which
@@ -1181,4 +1185,8 @@ func (wsc *websocketConnector) closeSendersRespondersAndReaders() {
 		wsc.removeSubscriptionRequestInfo(receivedSubId, false) //do not take the mapReceivedSubIdToSubscriptionInfoLock here, since we already locked it outside this for loop
 	}
 	wsc.mapReceivedSubIdToSubscriptionInfoLock.Unlock()
+}
+
+func (wsc *websocketConnector) GetLogTag() string {
+	return wsc.logTag
 }

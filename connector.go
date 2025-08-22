@@ -623,6 +623,28 @@ func (wsc *websocketConnector) incomingWsMessageHandler() {
 	}
 }
 
+// handleOutgoingWsMessageWriterError this function should be used only for connection-related errors inside outgoingWsMessageWriter,
+// which should then return right after this function return.
+func (wsc *websocketConnector) handleOutgoingWsMessageWriterError(errMsg string) {
+	log.Warningf("[%s][OutgoingWsMsgHandler] %s | Triggering reset procedure...\n", wsc.logTag, errMsg)
+
+	//start the reset procedure (in a separate goroutine, because the reset procedure requires all three main goroutines of the connector to be closed)
+	go wsc.resetOnce.Do(wsc.reset)
+
+	//don't return immediately, but wait for the "nil" on the outgoingWsMsgChan from the reset procedure while emptying
+	//the outgoingWsMsgChan to avoid send operations to block because of the outgoingWsMsgChan being full, which would
+	//cause the ongoingResetLock to be held indefinitely by the send operation, preventing the reset procedure from
+	//doing its job.
+	var msg *wsSentMessage
+	for msg = range wsc.outgoingWsMsgChan {
+		if msg == nil {
+			break
+		}
+	}
+
+	log.Warningf("[%s][OutgoingWsMsgHandler] Terminating\n", wsc.logTag)
+}
+
 func (wsc *websocketConnector) outgoingWsMessageWriter() {
 	wsc.goroutinesActiveLock.RLock()
 	defer wsc.goroutinesActiveLock.RUnlock()
@@ -650,14 +672,19 @@ func (wsc *websocketConnector) outgoingWsMessageWriter() {
 
 		log.Tracef("[%s][OutgoingWsMsgHandler] Sending ws msg: %s\n", wsc.logTag, msgBytes)
 
+		//set write deadline
+		err = wsc.wsConn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+		if err != nil {
+			//handle error and close the outgoingWsMessageWriter goroutine
+			wsc.handleOutgoingWsMessageWriterError(fmt.Sprintf("Error in wsc.wsConn.SetWriteDeadline(time.Now().Add(2 * time.Second)): %s", err))
+			return
+		}
+
+		//write message
 		err = wsc.wsConn.WriteMessage(websocket.TextMessage, msgBytes)
 		if err != nil {
-			log.Warningf("[%s][OutgoingWsMsgHandler] Error in wsc.wsConn.WriteMessage(websocket.TextMessage, msgBytes): %s | Triggering reset procedure...\n", wsc.logTag, err)
-
-			//start the reset procedure (in a separate goroutine, because the reset procedure requires all three main goroutines of the connector to be closed)
-			go wsc.resetOnce.Do(wsc.reset)
-
-			//kill this goroutine
+			//handle error and close the outgoingWsMessageWriter goroutine
+			wsc.handleOutgoingWsMessageWriterError(fmt.Sprintf("Error in wsc.wsConn.WriteMessage(websocket.TextMessage, msgBytes): %s", err))
 			return
 		}
 	}

@@ -673,10 +673,10 @@ func (wsc *websocketConnector) outgoingWsMessageWriter() {
 		log.Tracef("[%s][OutgoingWsMsgHandler] Sending ws msg: %s\n", wsc.logTag, msgBytes)
 
 		//set write deadline
-		err = wsc.wsConn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+		err = wsc.wsConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 		if err != nil {
 			//handle error and close the outgoingWsMessageWriter goroutine
-			wsc.handleOutgoingWsMessageWriterError(fmt.Sprintf("Error in wsc.wsConn.SetWriteDeadline(time.Now().Add(2 * time.Second)): %s", err))
+			wsc.handleOutgoingWsMessageWriterError(fmt.Sprintf("Error in wsc.wsConn.SetWriteDeadline(time.Now().Add(10 * time.Second)): %s", err))
 			return
 		}
 
